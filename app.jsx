@@ -955,12 +955,12 @@ const App = () => {
                   dbdLoadingItems ? 'opacity-60 cursor-wait' : ''
                 } ${isDarkMode ? 'border-zinc-600 text-zinc-300 hover:bg-zinc-700/50' : 'border-zinc-300 text-zinc-600 hover:bg-zinc-50'}`}>
                 {dbdLoadingItems ? <Loader2 size={14} className="animate-spin" /> : <ClipboardList size={14} />}
-                {dbdLoadingItems ? '載入中...' : '查看 DinBenDon 訂單品項'}
+                {dbdLoadingItems ? '載入中...' : '查看已推送的訂單'}
               </button>
               {dbdItems && dbdItems.length > 0 && (
                 <div className={`mt-3 rounded-xl border ${cardBorder} overflow-hidden`}>
                   <div className={`px-3 py-2 text-xs font-bold ${isDarkMode ? 'bg-zinc-700/50 text-zinc-300' : 'bg-zinc-100 text-zinc-600'}`}>
-                    DinBenDon 已訂購 ({dbdItems.length} 項)
+                    bearlunch 已推送 ({dbdItems.length} 項)
                   </div>
                   <div className="divide-y divide-zinc-200/20">
                     {dbdItems.map((item, i) => (
@@ -986,7 +986,7 @@ const App = () => {
                 </div>
               )}
               {dbdItems && dbdItems.length === 0 && (
-                <p className={`mt-3 text-sm ${textSecondary}`}>DinBenDon 上目前沒有訂單品項</p>
+                <p className={`mt-3 text-sm ${textSecondary}`}>目前沒有從 bearlunch 推送的訂單</p>
               )}
               <p className={`text-xs mt-3 ${textSecondary}`}>
                 同步菜單：從 DinBenDon 拉取最新菜單 → 推送訂單：將今天的點餐送上 DinBenDon

@@ -319,7 +319,8 @@ async function getDbdPushedItems() {
       for (const buyer of buyers) {
         const items = buyer.items || [];
         for (const item of items) {
-          // orderItemIds 是陣列，每個 item 可能合併多筆
+          // 只收集 bearlunch 推送的訂單（canCancel = true 代表同 session 推的）
+          if (item.cancelable !== true) continue;
           const itemIds = item.orderItemIds || [];
           allItems.push({
             orderHashId: order.orderHashId,
@@ -331,7 +332,7 @@ async function getDbdPushedItems() {
             price: item.total ?? item.price ?? 0,
             qty: item.size || item.qty || 1,
             playedName: buyer.name || '未知',
-            canCancel: item.cancelable !== false
+            canCancel: true
           });
         }
       }
