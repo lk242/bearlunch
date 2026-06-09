@@ -13,7 +13,7 @@ import express from 'express';
 import cors from 'cors';
 import { initializeApp } from 'firebase/app';
 import {
-  getFirestore, collection, doc, getDocs, writeBatch, updateDoc, setDoc
+  getFirestore, collection, doc, getDoc, getDocs, writeBatch, updateDoc, setDoc, onSnapshot
 } from 'firebase/firestore';
 import { getAuth, signInAnonymously } from 'firebase/auth';
 import path from 'path';
@@ -217,8 +217,21 @@ function findProduct(itemName, itemPrice, categories) {
   return null;
 }
 
-async function pushOrders() {
+function extractOrderItemIds(addResult) {
+  const data = addResult?.data || {};
+  if (Array.isArray(data.orderItemIds)) return data.orderItemIds;
+  if (Array.isArray(data.orderItems)) return data.orderItems.map(i => i.id).filter(Boolean);
+  return [];
+}
+
+async function pushOrders(agentName) {
   await dbdLogin();
+
+  // 讀取總代理人名稱（優先用參數，否則從 Firebase config 取）
+  if (!agentName) {
+    const configSnap = await getDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'config', 'settings'));
+    agentName = configSnap.data()?.agentName || DBD_USERNAME;
+  }
 
   const ordersCol = collection(db, 'artifacts', APP_ID, 'public', 'data', 'orders');
   const snapshot = await getDocs(ordersCol);
@@ -232,17 +245,18 @@ async function pushOrders() {
   const results = [];
   let pushed = 0, failed = 0;
 
+  // 按店家分組
   const byShop = {};
   for (const order of unpushed) {
     const shop = order.shopName || '未知';
     (byShop[shop] ||= []).push(order);
   }
 
-  for (const [shopName, orders] of Object.entries(byShop)) {
+  for (const [shopName, shopOrders] of Object.entries(byShop)) {
     const dbdOrder = findMatchingDbdOrder(shopName, dbdOrders);
     if (!dbdOrder) {
-      orders.forEach(o => results.push({ user: o.userName, status: 'skip', reason: `找不到「${shopName}」的 DinBenDon 訂單` }));
-      failed += orders.length;
+      shopOrders.forEach(o => results.push({ user: o.userName, status: 'skip', reason: `找不到「${shopName}」的 DinBenDon 訂單` }));
+      failed += shopOrders.length;
       continue;
     }
 
@@ -254,53 +268,72 @@ async function pushOrders() {
     const categories = menuData?.shop?.categories || [];
     const shopRevisionNo = menuData?.shop?.revisionNo || 0;
 
-    for (const order of orders) {
-      const items = order.items || [{ name: order.itemName, price: order.price }];
-      const addProducts = [];
+    // 總代理人制：合併同店所有品項為一次推送，備註寫個人名
+    const allProducts = [];
+    const orderMap = []; // 追蹤每個 product 對應的 Firebase order
 
+    for (const order of shopOrders) {
+      const items = order.items || [{ name: order.itemName, price: order.price }];
       for (const item of items) {
         const match = findProduct(item.name, item.price, categories);
         if (match) {
-          addProducts.push({
+          allProducts.push({
             productId: match.product.id, variationId: match.variation.id,
-            qty: 1, comment: null, categoryName: match.categoryName,
+            qty: 1, comment: order.userName || '未知',
+            categoryName: match.categoryName,
             productName: match.product.name, variationName: match.variation.name || '',
             price: match.variation.price
           });
+          orderMap.push(order);
+        } else {
+          results.push({ user: order.userName, status: 'skip', reason: `品項「${item.name}」比對失敗` });
+          failed++;
         }
       }
+    }
 
-      if (addProducts.length === 0) {
-        results.push({ user: order.userName, status: 'skip', reason: '品項比對失敗' });
-        failed++;
-        continue;
-      }
+    if (allProducts.length === 0) continue;
 
-      try {
-        const addResult = await dbdFetch(`/order/${dbdOrder.orderHashId}/add-item`, {
-          method: 'POST',
-          body: JSON.stringify({
-            addProducts, playedName: order.userName || '未知',
-            buyerInfo: null, addMisc: null, shopRevisionNo
-          })
-        });
-        // 儲存 DinBenDon 回傳的 orderItemIds，以便後續取消
-        const dbdItemIds = addResult.data?.orderItemIds || addResult.data?.orderItems?.map(i => i.id) || [];
+    try {
+      const addResult = await dbdFetch(`/order/${dbdOrder.orderHashId}/add-item`, {
+        method: 'POST',
+        body: JSON.stringify({
+          addProducts: allProducts, playedName: agentName,
+          buyerInfo: null, addMisc: null, shopRevisionNo
+        })
+      });
+      const dbdItemIds = extractOrderItemIds(addResult);
+      const dbdItemIdsByOrderId = new Map();
+      orderMap.forEach((order, index) => {
+        const itemId = dbdItemIds[index];
+        if (!itemId) return;
+        const ids = dbdItemIdsByOrderId.get(order.id) || [];
+        ids.push(itemId);
+        dbdItemIdsByOrderId.set(order.id, ids);
+      });
+      const isDbdItemIdMapIncomplete = dbdItemIds.length !== allProducts.length;
+
+      // 更新所有相關的 Firebase 訂單
+      const updatedIds = new Set();
+      for (const order of orderMap) {
+        if (updatedIds.has(order.id)) continue;
+        updatedIds.add(order.id);
         await updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'orders', order.id), {
           pushedToDbd: true, pushedAt: Date.now(),
           dbdOrderHashId: dbdOrder.orderHashId,
-          dbdOrderItemIds: dbdItemIds
+          dbdOrderItemIds: dbdItemIdsByOrderId.get(order.id) || [],
+          dbdOrderItemIdMapIncomplete: isDbdItemIdMapIncomplete
         });
-        results.push({ user: order.userName, status: 'ok', items: addProducts.map(p => p.productName), dbdItemIds });
+        results.push({ user: order.userName, status: 'ok', items: allProducts.filter((_, i) => orderMap[i].id === order.id).map(p => p.productName) });
         pushed++;
-      } catch (e) {
-        results.push({ user: order.userName, status: 'error', reason: e.message });
-        failed++;
       }
+    } catch (e) {
+      shopOrders.forEach(o => results.push({ user: o.userName, status: 'error', reason: e.message }));
+      failed += shopOrders.length;
     }
   }
 
-  return { success: true, message: `推送完成：${pushed} 成功、${failed} 失敗`, pushed, failed, results };
+  return { success: true, message: `推送完成：${pushed} 成功、${failed} 失敗（代理人：${agentName}）`, pushed, failed, results, agentName };
 }
 
 // ── Cancel / Query Pushed Items ───────────────────────────
@@ -320,6 +353,7 @@ async function getDbdPushedItems() {
       data.dbdOrderItemIds.forEach(id => pushedItemIds.add(id));
     }
   });
+  console.log('Firebase pushed IDs:', JSON.stringify([...pushedItemIds]));
 
   const allItems = [];
   for (const order of dbdOrders) {
@@ -381,7 +415,7 @@ app.post('/api/sync-menu', async (req, res) => {
 
 app.post('/api/push-orders', async (req, res) => {
   try {
-    const result = await pushOrders();
+    const result = await pushOrders(req.body?.agentName);
     res.json(result);
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
@@ -423,8 +457,55 @@ if (isProduction) {
   app.get('/{*path}', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
 }
 
+// ── 定時排程系統 ─────────────────────────────────────────────
+
+let scheduleTimers = { sync: null, push: null };
+let lastScheduleConfig = {};
+
+function setupSchedule(type, timeStr, fn) {
+  if (scheduleTimers[type]) { clearInterval(scheduleTimers[type]); scheduleTimers[type] = null; }
+  if (!timeStr) return;
+  const [h, m] = timeStr.split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return;
+
+  let lastRun = '';
+  scheduleTimers[type] = setInterval(() => {
+    const now = new Date();
+    const today = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+    const nowH = now.getHours(), nowM = now.getMinutes();
+    const key = `${today}-${h}:${m}`;
+    if (nowH === h && nowM === m && lastRun !== key) {
+      lastRun = key;
+      console.log(`⏰ 定時排程觸發：${type} (${timeStr})`);
+      fn().catch(e => console.error(`排程 ${type} 失敗:`, e.message));
+    }
+  }, 30_000);
+  console.log(`📅 已設定 ${type} 排程：每天 ${timeStr}`);
+}
+
+function watchScheduleConfig() {
+  const configRef = doc(db, 'artifacts', APP_ID, 'public', 'data', 'config', 'settings');
+  onSnapshot(configRef, (snap) => {
+    const data = snap.data() || {};
+    const syncTime = data.autoSyncTime || '';
+    const pushTime = data.autoPushTime || '';
+    const agentName = data.agentName || '';
+
+    if (syncTime !== lastScheduleConfig.syncTime) {
+      setupSchedule('sync', syncTime, () => syncMenu(true));
+      lastScheduleConfig.syncTime = syncTime;
+    }
+    if (pushTime !== lastScheduleConfig.pushTime) {
+      setupSchedule('push', pushTime, () => pushOrders());
+      lastScheduleConfig.pushTime = pushTime;
+    }
+    lastScheduleConfig.agentName = agentName;
+  });
+}
+
 app.listen(PORT, () => {
   console.log(`🚀 API Server 啟動: http://localhost:${PORT}`);
   if (isProduction) console.log('   正式模式 — 同時提供前端靜態檔');
   else console.log('   開發模式 — 前端請用 Vite (localhost:5173)');
+  watchScheduleConfig();
 });

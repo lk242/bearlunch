@@ -117,6 +117,9 @@ const App = () => {
   const [dbdItems, setDbdItems] = useState(null);      // DinBenDon 上的品項列表
   const [dbdLoadingItems, setDbdLoadingItems] = useState(false);
   const [dbdCancelling, setDbdCancelling] = useState(new Set()); // 正在取消的 itemId
+  const [agentName, setAgentName] = useState('');
+  const [autoSyncTime, setAutoSyncTime] = useState('');
+  const [autoPushTime, setAutoPushTime] = useState('');
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -218,6 +221,9 @@ const App = () => {
         const data = snap.data();
         setDeadline(data.deadline || "10:00");
         if (data.deadlineTimestamp) setDeadlineTimestamp(data.deadlineTimestamp);
+        if (data.agentName !== undefined) setAgentName(data.agentName || '');
+        if (data.autoSyncTime !== undefined) setAutoSyncTime(data.autoSyncTime || '');
+        if (data.autoPushTime !== undefined) setAutoPushTime(data.autoPushTime || '');
       }
     });
 
@@ -282,7 +288,7 @@ const App = () => {
   };
 
   const toggleAdminMode = () => {
-    if (isAdmin) { setIsAdmin(false); showNotify("已關閉管理模式"); }
+    if (isAdmin) { setIsAdmin(false); setActiveTab('order'); showNotify("已關閉管理模式"); }
     else { setShowAdminLogin(true); }
   };
 
@@ -413,7 +419,8 @@ const App = () => {
     try {
       const res = await fetch(`${API_BASE}/api/push-orders`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentName: agentName || undefined })
       });
       const data = await res.json();
       setDbdResult({ type: 'push', ...data });
@@ -568,9 +575,12 @@ const App = () => {
               {[
                 { id: 'order', label: '點餐', icon: UtensilsCrossed },
                 { id: 'summary', label: '統整', icon: ClipboardList },
-                { id: 'admin', label: '設定', icon: Settings },
+                { id: 'admin', label: '設定', icon: Settings, adminOnly: true },
               ].map(tab => (
-                <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${activeTab === tab.id ? `${accentBg} text-white` : `${textSecondary} hover:${textPrimary}`}`}>
+                <button key={tab.id} onClick={() => {
+                  if (tab.adminOnly && !isAdmin) { setShowAdminLogin(true); return; }
+                  setActiveTab(tab.id);
+                }} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${activeTab === tab.id ? `${accentBg} text-white` : `${textSecondary} hover:${textPrimary}`}`}>
                   <tab.icon size={14} />
                   <span className="hidden sm:inline">{tab.label}</span>
                 </button>
@@ -887,7 +897,7 @@ const App = () => {
         )}
 
         {/* ════════ 設定 Tab ════════ */}
-        {activeTab === 'admin' && (
+        {activeTab === 'admin' && isAdmin && (
           <div className="max-w-2xl mx-auto space-y-5">
 
             {/* Deadline config */}
@@ -908,6 +918,68 @@ const App = () => {
                   </button>
                 </div>
               )}
+            </section>
+
+            {/* 總代理人 & 排程 */}
+            <section className={`rounded-2xl border p-5 ${cardBg} ${cardBorder}`}>
+              <h2 className={`text-base font-bold mb-4 flex items-center gap-2 ${accent}`}>
+                <Settings size={16} /> 推送設定
+              </h2>
+              <div className="space-y-4">
+                <div>
+                  <label className={`text-xs font-medium ${textSecondary} mb-1.5 block`}>總代理人名稱</label>
+                  <div className="flex gap-2">
+                    <input type="text" value={agentName} onChange={e => setAgentName(e.target.value)}
+                      placeholder="訂購人名稱（顯示在 DinBenDon）"
+                      className={`flex-1 px-4 py-2.5 rounded-xl border outline-none text-sm ${inputBg} focus:ring-2 focus:ring-orange-500/30`} />
+                    <button onClick={async () => {
+                      try {
+                        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'settings'), { agentName }, { merge: true });
+                        showNotify('已儲存代理人名稱');
+                      } catch { showNotify('儲存失敗'); }
+                    }} className={`px-4 py-2.5 ${accentBg} text-white rounded-xl text-sm font-medium hover:bg-orange-700 transition-colors`}>
+                      儲存
+                    </button>
+                  </div>
+                  <p className={`text-xs mt-1.5 ${textSecondary}`}>推送訂單時，以此名稱作為訂購人，各品項備註欄會帶入實際點餐者姓名</p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className={`text-xs font-medium ${textSecondary} mb-1.5 block`}>定時自動同步菜單</label>
+                    <div className="flex gap-2">
+                      <input type="time" value={autoSyncTime} onChange={e => setAutoSyncTime(e.target.value)}
+                        className={`flex-1 px-4 py-2.5 rounded-xl border outline-none text-sm ${inputBg} focus:ring-2 focus:ring-orange-500/30`} />
+                      <button onClick={async () => {
+                        try {
+                          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'settings'), { autoSyncTime }, { merge: true });
+                          showNotify(autoSyncTime ? `已設定每天 ${autoSyncTime} 自動同步` : '已關閉自動同步');
+                        } catch { showNotify('儲存失敗'); }
+                      }} className={`px-3 py-2.5 ${accentBg} text-white rounded-xl text-sm font-medium hover:bg-orange-700 transition-colors`}>
+                        儲存
+                      </button>
+                    </div>
+                    {autoSyncTime && <p className={`text-xs mt-1 ${textSecondary}`}>每天 {autoSyncTime} 自動從 DinBenDon 同步菜單</p>}
+                    {!autoSyncTime && <p className={`text-xs mt-1 ${textSecondary}`}>留空則不自動同步</p>}
+                  </div>
+                  <div>
+                    <label className={`text-xs font-medium ${textSecondary} mb-1.5 block`}>定時自動推送訂單</label>
+                    <div className="flex gap-2">
+                      <input type="time" value={autoPushTime} onChange={e => setAutoPushTime(e.target.value)}
+                        className={`flex-1 px-4 py-2.5 rounded-xl border outline-none text-sm ${inputBg} focus:ring-2 focus:ring-orange-500/30`} />
+                      <button onClick={async () => {
+                        try {
+                          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'settings'), { autoPushTime }, { merge: true });
+                          showNotify(autoPushTime ? `已設定每天 ${autoPushTime} 自動推送` : '已關閉自動推送');
+                        } catch { showNotify('儲存失敗'); }
+                      }} className={`px-3 py-2.5 ${accentBg} text-white rounded-xl text-sm font-medium hover:bg-orange-700 transition-colors`}>
+                        儲存
+                      </button>
+                    </div>
+                    {autoPushTime && <p className={`text-xs mt-1 ${textSecondary}`}>每天 {autoPushTime} 自動推送訂單到 DinBenDon</p>}
+                    {!autoPushTime && <p className={`text-xs mt-1 ${textSecondary}`}>留空則不自動推送</p>}
+                  </div>
+                </div>
+              </div>
             </section>
 
             {/* DinBenDon info */}
