@@ -277,17 +277,21 @@ async function pushOrders() {
       }
 
       try {
-        await dbdFetch(`/order/${dbdOrder.orderHashId}/add-item`, {
+        const addResult = await dbdFetch(`/order/${dbdOrder.orderHashId}/add-item`, {
           method: 'POST',
           body: JSON.stringify({
             addProducts, playedName: order.userName || '未知',
             buyerInfo: null, addMisc: null, shopRevisionNo
           })
         });
+        // 儲存 DinBenDon 回傳的 orderItemIds，以便後續取消
+        const dbdItemIds = addResult.data?.orderItemIds || addResult.data?.orderItems?.map(i => i.id) || [];
         await updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'orders', order.id), {
-          pushedToDbd: true, pushedAt: Date.now()
+          pushedToDbd: true, pushedAt: Date.now(),
+          dbdOrderHashId: dbdOrder.orderHashId,
+          dbdOrderItemIds: dbdItemIds
         });
-        results.push({ user: order.userName, status: 'ok', items: addProducts.map(p => p.productName) });
+        results.push({ user: order.userName, status: 'ok', items: addProducts.map(p => p.productName), dbdItemIds });
         pushed++;
       } catch (e) {
         results.push({ user: order.userName, status: 'error', reason: e.message });
@@ -297,6 +301,50 @@ async function pushOrders() {
   }
 
   return { success: true, message: `推送完成：${pushed} 成功、${failed} 失敗`, pushed, failed, results };
+}
+
+// ── Cancel / Query Pushed Items ───────────────────────────
+
+async function getDbdPushedItems() {
+  await dbdLogin();
+  const dbdOrders = await dbdGetActiveOrders();
+  if (dbdOrders.length === 0) return { success: true, items: [], message: '目前沒有進行中的訂單' };
+
+  const allItems = [];
+  for (const order of dbdOrders) {
+    try {
+      const data = await dbdFetch(`/order/${order.orderHashId}/buyer-for-buyer?expand=true&sortByName=false`);
+      const buyers = data.data || [];
+      for (const buyer of buyers) {
+        const items = buyer.orderItems || buyer.items || [];
+        for (const item of items) {
+          allItems.push({
+            orderHashId: order.orderHashId,
+            shopName: order.shopName,
+            orderItemId: item.id || item.orderItemId,
+            orderItemVersion: item.orderItemVersion || item.version,
+            productName: item.productName || item.name,
+            variationName: item.variationName || '',
+            price: item.price,
+            qty: item.qty || 1,
+            playedName: buyer.playedName || buyer.name,
+            canCancel: item.canCancel !== false  // 是否可取消
+          });
+        }
+      }
+    } catch (e) { /* skip */ }
+  }
+
+  return { success: true, items: allItems, message: `找到 ${allItems.length} 個已訂購品項` };
+}
+
+async function cancelDbdItems(orderHashId, orderItemIds) {
+  await dbdLogin();
+  const result = await dbdFetch(`/order/${orderHashId}/cancel-item`, {
+    method: 'POST',
+    body: JSON.stringify({ orderItemIds })
+  });
+  return { success: true, data: result.data, message: `已取消 ${orderItemIds.length} 個品項` };
 }
 
 // ── Express App ────────────────────────────────────────────
@@ -318,6 +366,28 @@ app.post('/api/sync-menu', async (req, res) => {
 app.post('/api/push-orders', async (req, res) => {
   try {
     const result = await pushOrders();
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+app.get('/api/dbd-items', async (req, res) => {
+  try {
+    const result = await getDbdPushedItems();
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+app.post('/api/cancel-items', async (req, res) => {
+  try {
+    const { orderHashId, orderItemIds } = req.body;
+    if (!orderHashId || !orderItemIds?.length) {
+      return res.status(400).json({ success: false, message: '需要 orderHashId 和 orderItemIds' });
+    }
+    const result = await cancelDbdItems(orderHashId, orderItemIds);
     res.json(result);
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });

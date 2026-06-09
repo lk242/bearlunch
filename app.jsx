@@ -114,6 +114,9 @@ const App = () => {
   const [dbdSyncing, setDbdSyncing] = useState(false);
   const [dbdPushing, setDbdPushing] = useState(false);
   const [dbdResult, setDbdResult] = useState(null);
+  const [dbdItems, setDbdItems] = useState(null);      // DinBenDon 上的品項列表
+  const [dbdLoadingItems, setDbdLoadingItems] = useState(false);
+  const [dbdCancelling, setDbdCancelling] = useState(new Set()); // 正在取消的 itemId
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -420,6 +423,46 @@ const App = () => {
       setDbdResult({ type: 'push', success: false, message: '無法連線到 API Server，請確認 server.mjs 是否啟動' });
       showNotify('API Server 無回應');
     } finally { setDbdPushing(false); }
+  };
+
+  const handleLoadDbdItems = async () => {
+    setDbdLoadingItems(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/dbd-items`);
+      const data = await res.json();
+      if (data.success) {
+        setDbdItems(data.items);
+        showNotify(`已載入 ${data.items.length} 個品項`);
+      } else {
+        showNotify(`載入失敗：${data.message}`);
+      }
+    } catch (e) {
+      showNotify('API Server 無回應');
+    } finally { setDbdLoadingItems(false); }
+  };
+
+  const handleCancelDbdItem = async (orderHashId, orderItemId, productName) => {
+    if (!confirm(`確定要取消「${productName}」嗎？此操作無法復原！`)) return;
+    setDbdCancelling(prev => new Set([...prev, orderItemId]));
+    try {
+      const res = await fetch(`${API_BASE}/api/cancel-items`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderHashId, orderItemIds: [orderItemId] })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showNotify(`已取消「${productName}」`);
+        // 從列表移除
+        setDbdItems(prev => prev.filter(i => i.orderItemId !== orderItemId));
+      } else {
+        showNotify(`取消失敗：${data.message}`);
+      }
+    } catch (e) {
+      showNotify('API Server 無回應');
+    } finally {
+      setDbdCancelling(prev => { const s = new Set(prev); s.delete(orderItemId); return s; });
+    }
   };
 
   // ── Theme helpers ──
@@ -907,6 +950,44 @@ const App = () => {
                   {dbdPushing ? '推送中...' : '推送訂單到 DinBenDon'}
                 </button>
               </div>
+              <button onClick={handleLoadDbdItems} disabled={dbdLoadingItems}
+                className={`w-full mt-3 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-colors border-2 ${
+                  dbdLoadingItems ? 'opacity-60 cursor-wait' : ''
+                } ${isDarkMode ? 'border-zinc-600 text-zinc-300 hover:bg-zinc-700/50' : 'border-zinc-300 text-zinc-600 hover:bg-zinc-50'}`}>
+                {dbdLoadingItems ? <Loader2 size={14} className="animate-spin" /> : <ClipboardList size={14} />}
+                {dbdLoadingItems ? '載入中...' : '查看 DinBenDon 訂單品項'}
+              </button>
+              {dbdItems && dbdItems.length > 0 && (
+                <div className={`mt-3 rounded-xl border ${cardBorder} overflow-hidden`}>
+                  <div className={`px-3 py-2 text-xs font-bold ${isDarkMode ? 'bg-zinc-700/50 text-zinc-300' : 'bg-zinc-100 text-zinc-600'}`}>
+                    DinBenDon 已訂購 ({dbdItems.length} 項)
+                  </div>
+                  <div className="divide-y divide-zinc-200/20">
+                    {dbdItems.map((item, i) => (
+                      <div key={item.orderItemId || i} className={`flex items-center justify-between px-3 py-2 text-sm ${textPrimary}`}>
+                        <div className="flex-1 min-w-0">
+                          <span className="font-medium">{item.productName}</span>
+                          {item.variationName && <span className={`ml-1 ${textSecondary}`}>({item.variationName})</span>}
+                          <span className="ml-2 text-orange-500 font-mono">${item.price}</span>
+                          <span className={`ml-2 text-xs ${textSecondary}`}>{item.playedName}</span>
+                        </div>
+                        {item.orderItemId && (
+                          <button
+                            onClick={() => handleCancelDbdItem(item.orderHashId, item.orderItemId, item.productName)}
+                            disabled={dbdCancelling.has(item.orderItemId)}
+                            className="ml-2 p-1.5 rounded-lg text-red-500 hover:bg-red-500/10 transition-colors shrink-0"
+                            title="取消此品項">
+                            {dbdCancelling.has(item.orderItemId) ? <Loader2 size={14} className="animate-spin" /> : <X size={14} />}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {dbdItems && dbdItems.length === 0 && (
+                <p className={`mt-3 text-sm ${textSecondary}`}>DinBenDon 上目前沒有訂單品項</p>
+              )}
               <p className={`text-xs mt-3 ${textSecondary}`}>
                 同步菜單：從 DinBenDon 拉取最新菜單 → 推送訂單：將今天的點餐送上 DinBenDon
               </p>
