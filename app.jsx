@@ -971,7 +971,7 @@ const App = () => {
                           <span className="ml-2 text-orange-500 font-mono">${item.price}</span>
                           <span className={`ml-2 text-xs ${textSecondary}`}>{item.playedName}</span>
                         </div>
-                        {item.orderItemId && (
+                        {item.orderItemId && item.canCancel && (
                           <button
                             onClick={() => handleCancelDbdItem(item.orderHashId, item.orderItemId, item.productName)}
                             disabled={dbdCancelling.has(item.orderItemId)}
@@ -979,6 +979,9 @@ const App = () => {
                             title="取消此品項">
                             {dbdCancelling.has(item.orderItemId) ? <Loader2 size={14} className="animate-spin" /> : <X size={14} />}
                           </button>
+                        )}
+                        {item.orderItemId && !item.canCancel && (
+                          <span className={`ml-2 text-xs ${textSecondary}`} title="伺服器重啟後無法取消，需在 DinBenDon 手動處理">已鎖定</span>
                         )}
                       </div>
                     ))}

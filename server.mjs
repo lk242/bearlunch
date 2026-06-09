@@ -310,6 +310,17 @@ async function getDbdPushedItems() {
   const dbdOrders = await dbdGetActiveOrders();
   if (dbdOrders.length === 0) return { success: true, items: [], message: '目前沒有進行中的訂單' };
 
+  // 從 Firebase 取得我們推送過的 orderItemIds 作為比對依據
+  const ordersCol = collection(db, 'artifacts', APP_ID, 'public', 'data', 'orders');
+  const fbSnapshot = await getDocs(ordersCol);
+  const pushedItemIds = new Set();
+  fbSnapshot.docs.forEach(d => {
+    const data = d.data();
+    if (data.pushedToDbd && data.dbdOrderItemIds) {
+      data.dbdOrderItemIds.forEach(id => pushedItemIds.add(id));
+    }
+  });
+
   const allItems = [];
   for (const order of dbdOrders) {
     try {
@@ -319,27 +330,28 @@ async function getDbdPushedItems() {
       for (const buyer of buyers) {
         const items = buyer.items || [];
         for (const item of items) {
-          // 只收集 bearlunch 推送的訂單（canCancel = true 代表同 session 推的）
-          if (item.cancelable !== true) continue;
           const itemIds = item.orderItemIds || [];
+          // 用 Firebase 紀錄比對：只顯示 bearlunch 推送過的品項
+          const isOurs = itemIds.some(id => pushedItemIds.has(id));
+          if (!isOurs) continue;
           allItems.push({
             orderHashId: order.orderHashId,
             shopName: order.shopName,
-            orderItemId: itemIds[0],         // 主要 ID（用於取消）
-            orderItemIds: itemIds,            // 完整 ID 列表
+            orderItemId: itemIds[0],
+            orderItemIds: itemIds,
             productName: item.mergedName || item.fullName || item.name || '未知品項',
             variationName: item.variationName || '',
             price: item.total ?? item.price ?? 0,
             qty: item.size || item.qty || 1,
             playedName: buyer.name || '未知',
-            canCancel: true
+            canCancel: item.cancelable === true  // 同 session 才能取消
           });
         }
       }
     } catch (e) { /* skip */ }
   }
 
-  return { success: true, items: allItems, message: `找到 ${allItems.length} 個已訂購品項` };
+  return { success: true, items: allItems, message: `找到 ${allItems.length} 個 bearlunch 推送的品項` };
 }
 
 async function cancelDbdItems(orderHashId, orderItemIds) {
