@@ -331,7 +331,7 @@ app.get('/api/health', (req, res) => {
 // 正式模式：serve 前端靜態檔
 if (isProduction) {
   app.use(express.static(path.join(__dirname, 'dist')));
-  app.get('*', (req, res) => {
+  app.get('/{*path}', (req, res) => {
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
   });
 }
