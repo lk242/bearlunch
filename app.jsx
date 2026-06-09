@@ -110,7 +110,7 @@ const App = () => {
   const [currentTime, setCurrentTime] = useState(new Date());
 
   // DinBenDon 自動化
-  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+  const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '' : 'http://localhost:3001');
   const [dbdSyncing, setDbdSyncing] = useState(false);
   const [dbdPushing, setDbdPushing] = useState(false);
   const [dbdResult, setDbdResult] = useState(null);

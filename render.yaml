@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: bear-joy-lunch
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: node server.mjs --production
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: DBD_USERNAME
+        sync: false
+      - key: DBD_PASSWORD
+        sync: false
