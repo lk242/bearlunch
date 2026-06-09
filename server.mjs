@@ -314,26 +314,24 @@ async function getDbdPushedItems() {
   for (const order of dbdOrders) {
     try {
       const data = await dbdFetch(`/order/${order.orderHashId}/buyer-for-buyer?expand=true&sortByName=false`);
-      console.log('buyer-for-buyer response keys:', JSON.stringify(Object.keys(data.data || data)));
-      const buyers = data.data?.buyers || data.data || [];
-      if (!Array.isArray(buyers)) {
-        console.log('buyer-for-buyer data structure:', JSON.stringify(data.data).substring(0, 500));
-      }
-      for (const buyer of (Array.isArray(buyers) ? buyers : [])) {
-        const items = buyer.orderItems || buyer.items || [];
-        console.log(`buyer ${buyer.playedName || buyer.name}: ${items.length} items, keys:`, JSON.stringify(Object.keys(buyer)));
+      // DinBenDon 回傳格式: data.rows = [{name, items: [{orderItemIds, mergedName, ...}]}]
+      const buyers = data.data?.rows || [];
+      for (const buyer of buyers) {
+        const items = buyer.items || [];
         for (const item of items) {
+          // orderItemIds 是陣列，每個 item 可能合併多筆
+          const itemIds = item.orderItemIds || [];
           allItems.push({
             orderHashId: order.orderHashId,
             shopName: order.shopName,
-            orderItemId: item.id || item.orderItemId,
-            orderItemVersion: item.orderItemVersion || item.version,
-            productName: item.productName || item.name,
+            orderItemId: itemIds[0],         // 主要 ID（用於取消）
+            orderItemIds: itemIds,            // 完整 ID 列表
+            productName: item.mergedName || item.fullName || item.name || '未知品項',
             variationName: item.variationName || '',
-            price: item.price,
-            qty: item.qty || 1,
-            playedName: buyer.playedName || buyer.name,
-            canCancel: item.canCancel !== false  // 是否可取消
+            price: item.total ?? item.price ?? 0,
+            qty: item.size || item.qty || 1,
+            playedName: buyer.name || '未知',
+            canCancel: item.cancelable !== false
           });
         }
       }
