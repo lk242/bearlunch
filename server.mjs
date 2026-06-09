@@ -58,6 +58,36 @@ function formatTimeInTaipei(date) {
   }).format(date);
 }
 
+function getTaipeiDateParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: DISPLAY_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).formatToParts(date);
+  const value = (type) => parts.find(p => p.type === type)?.value || '';
+  return {
+    dateKey: `${value('year')}-${value('month')}-${value('day')}`,
+    hour: Number(value('hour')),
+    minute: Number(value('minute'))
+  };
+}
+
+function parseTimeString(timeStr) {
+  const [hour, minute] = String(timeStr || '').split(':').map(Number);
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return null;
+  return { hour, minute };
+}
+
+function isTaipeiTimeDue(timeStr, nowParts = getTaipeiDateParts()) {
+  const parsed = parseTimeString(timeStr);
+  if (!parsed) return false;
+  return nowParts.hour * 60 + nowParts.minute >= parsed.hour * 60 + parsed.minute;
+}
+
 async function dbdFetch(path, options = {}) {
   const url = `${DBD_BASE}${path}`;
   const headers = {
@@ -472,25 +502,43 @@ if (isProduction) {
 let scheduleTimers = { sync: null, push: null };
 let lastScheduleConfig = {};
 
+async function runScheduledTask(type, timeStr, fn) {
+  const configRef = doc(db, 'artifacts', APP_ID, 'public', 'data', 'config', 'settings');
+  const nowParts = getTaipeiDateParts();
+  const configSnap = await getDoc(configRef);
+  const config = configSnap.data() || {};
+  if (config.scheduleRuns?.[type] === nowParts.dateKey) return;
+
+  console.log(`⏰ 定時排程觸發：${type} (${timeStr}, ${DISPLAY_TIME_ZONE})`);
+  const result = await fn();
+  await setDoc(configRef, {
+    scheduleRuns: { [type]: nowParts.dateKey },
+    scheduleLastRunAt: { [type]: Date.now() },
+    scheduleLastResult: { [type]: result?.message || '完成' }
+  }, { merge: true });
+}
+
 function setupSchedule(type, timeStr, fn) {
   if (scheduleTimers[type]) { clearInterval(scheduleTimers[type]); scheduleTimers[type] = null; }
   if (!timeStr) return;
-  const [h, m] = timeStr.split(':').map(Number);
-  if (isNaN(h) || isNaN(m)) return;
+  const parsed = parseTimeString(timeStr);
+  if (!parsed) return;
 
   let lastRun = '';
   scheduleTimers[type] = setInterval(() => {
-    const now = new Date();
-    const today = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
-    const nowH = now.getHours(), nowM = now.getMinutes();
-    const key = `${today}-${h}:${m}`;
-    if (nowH === h && nowM === m && lastRun !== key) {
+    const nowParts = getTaipeiDateParts();
+    const key = `${nowParts.dateKey}-${timeStr}`;
+    if (nowParts.hour === parsed.hour && nowParts.minute === parsed.minute && lastRun !== key) {
       lastRun = key;
-      console.log(`⏰ 定時排程觸發：${type} (${timeStr})`);
-      fn().catch(e => console.error(`排程 ${type} 失敗:`, e.message));
+      runScheduledTask(type, timeStr, fn).catch(e => console.error(`排程 ${type} 失敗:`, e.message));
     }
   }, 30_000);
-  console.log(`📅 已設定 ${type} 排程：每天 ${timeStr}`);
+
+  if (isTaipeiTimeDue(timeStr)) {
+    runScheduledTask(type, timeStr, fn).catch(e => console.error(`排程 ${type} 補跑失敗:`, e.message));
+  }
+
+  console.log(`📅 已設定 ${type} 排程：每天 ${timeStr} (${DISPLAY_TIME_ZONE})`);
 }
 
 function watchScheduleConfig() {

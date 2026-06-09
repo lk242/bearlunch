@@ -134,6 +134,8 @@ const App = () => {
   const [agentName, setAgentName] = useState('');
   const [autoSyncTime, setAutoSyncTime] = useState('');
   const [autoPushTime, setAutoPushTime] = useState('');
+  const [scheduleLastRunAt, setScheduleLastRunAt] = useState({});
+  const [scheduleLastResult, setScheduleLastResult] = useState({});
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -238,6 +240,8 @@ const App = () => {
         if (data.agentName !== undefined) setAgentName(data.agentName || '');
         if (data.autoSyncTime !== undefined) setAutoSyncTime(data.autoSyncTime || '');
         if (data.autoPushTime !== undefined) setAutoPushTime(data.autoPushTime || '');
+        setScheduleLastRunAt(data.scheduleLastRunAt || {});
+        setScheduleLastResult(data.scheduleLastResult || {});
       }
     });
 
@@ -984,6 +988,9 @@ const App = () => {
                     </div>
                     {autoSyncTime && <p className={`text-xs mt-1 ${textSecondary}`}>每天 {autoSyncTime} 自動從 DinBenDon 同步菜單</p>}
                     {!autoSyncTime && <p className={`text-xs mt-1 ${textSecondary}`}>留空則不自動同步</p>}
+                    {scheduleLastRunAt.sync && (
+                      <p className={`text-xs mt-1 ${textSecondary}`}>上次執行：{formatDeadlineLabel(new Date(scheduleLastRunAt.sync))}，{scheduleLastResult.sync || '完成'}</p>
+                    )}
                   </div>
                   <div>
                     <label className={`text-xs font-medium ${textSecondary} mb-1.5 block`}>定時自動推送訂單</label>
@@ -1001,6 +1008,9 @@ const App = () => {
                     </div>
                     {autoPushTime && <p className={`text-xs mt-1 ${textSecondary}`}>每天 {autoPushTime} 自動推送訂單到 DinBenDon</p>}
                     {!autoPushTime && <p className={`text-xs mt-1 ${textSecondary}`}>留空則不自動推送</p>}
+                    {scheduleLastRunAt.push && (
+                      <p className={`text-xs mt-1 ${textSecondary}`}>上次執行：{formatDeadlineLabel(new Date(scheduleLastRunAt.push))}，{scheduleLastResult.push || '完成'}</p>
+                    )}
                   </div>
                 </div>
               </div>
