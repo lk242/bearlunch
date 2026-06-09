@@ -34,6 +34,7 @@ const firebaseConfig = {
   appId: "1:227348367786:web:eeb497ecbbe5bea8ca83d3"
 };
 const APP_ID = 'bear-joy-lunch-express';
+const DISPLAY_TIME_ZONE = 'Asia/Taipei';
 const fbApp = initializeApp(firebaseConfig);
 const fbAuth = getAuth(fbApp);
 const db = getFirestore(fbApp);
@@ -47,6 +48,15 @@ const DBD_BASE = 'https://dinbendon.net/mvc/api';
 const DBD_USERNAME = process.env.DBD_USERNAME || '26522689';
 const DBD_PASSWORD = process.env.DBD_PASSWORD || DBD_USERNAME;
 let jwt = '';
+
+function formatTimeInTaipei(date) {
+  return new Intl.DateTimeFormat('zh-TW', {
+    timeZone: DISPLAY_TIME_ZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).format(date);
+}
 
 async function dbdFetch(path, options = {}) {
   const url = `${DBD_BASE}${path}`;
@@ -150,7 +160,7 @@ async function syncMenu(clearFirst) {
   // 從 DinBenDon 訂單的 expireDate 更新截止時間（存完整 timestamp）
   const expireTs = activeOrders[0].expireDate;
   const expireDate = new Date(expireTs);
-  const deadlineStr = `${expireDate.getHours().toString().padStart(2,'0')}:${expireDate.getMinutes().toString().padStart(2,'0')}`;
+  const deadlineStr = formatTimeInTaipei(expireDate);
   await setDoc(
     doc(db, 'artifacts', APP_ID, 'public', 'data', 'config', 'settings'),
     { deadline: deadlineStr, deadlineTimestamp: expireTs },

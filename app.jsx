@@ -76,6 +76,20 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const rawAppId = typeof __app_id !== 'undefined' ? __app_id : 'bear-joy-lunch-express';
 const appId = String(rawAppId).replace(/\//g, '_');
+const DISPLAY_TIME_ZONE = 'Asia/Taipei';
+
+const formatDeadlineLabel = (date) => {
+  const parts = new Intl.DateTimeFormat('zh-TW', {
+    timeZone: DISPLAY_TIME_ZONE,
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).formatToParts(date);
+  const value = (type) => parts.find(p => p.type === type)?.value || '';
+  return `${value('month')}/${value('day')} ${value('hour')}:${value('minute')}`;
+};
 
 const App = () => {
   const [user, setUser] = useState(null);
@@ -220,7 +234,7 @@ const App = () => {
       if (snap.exists()) {
         const data = snap.data();
         setDeadline(data.deadline || "10:00");
-        if (data.deadlineTimestamp) setDeadlineTimestamp(data.deadlineTimestamp);
+        setDeadlineTimestamp(data.deadlineTimestamp || null);
         if (data.agentName !== undefined) setAgentName(data.agentName || '');
         if (data.autoSyncTime !== undefined) setAutoSyncTime(data.autoSyncTime || '');
         if (data.autoPushTime !== undefined) setAutoPushTime(data.autoPushTime || '');
@@ -295,7 +309,7 @@ const App = () => {
   const updateDeadline = async (newTime) => {
     if (!isAdmin) return;
     try {
-      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'settings'), { deadline: newTime }, { merge: true });
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'settings'), { deadline: newTime, deadlineTimestamp: null }, { merge: true });
       showNotify(`截止時間已更新為 ${newTime}`);
     } catch (e) { showNotify("儲存失敗"); }
   };
@@ -608,7 +622,7 @@ const App = () => {
                   <div className="flex items-center gap-2">
                     {isTimeLocked ? <Ban size={16} className="text-red-500" /> : <Clock size={16} className={accent} />}
                     <span className={`text-sm font-semibold ${isTimeLocked ? 'text-red-600 dark:text-red-400' : accent}`}>
-                      {isTimeLocked ? '已截止' : `截止 ${deadlineDate.getMonth()+1}/${deadlineDate.getDate()} ${deadline}`}
+                      {isTimeLocked ? '已截止' : `截止 ${formatDeadlineLabel(deadlineDate)}`}
                     </span>
                   </div>
                   <span className={`text-xs ${textSecondary}`}>{currentTime.toLocaleTimeString([], { hour12: false })}</span>
@@ -866,7 +880,17 @@ const App = () => {
                           <div className="font-semibold text-sm">{order.userName}</div>
                           <div className={`text-xs ${textSecondary}`}>#{order.extensionId}</div>
                         </div>
-                        <span className="font-bold text-sm">${order.price}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm">${order.price}</span>
+                          {isAdmin && (
+                            <button
+                              onClick={() => setConfirmModal({ show: true, type: 'delete_single', label: `${order.userName} 的訂單`, data: order.id })}
+                              className="p-1.5 rounded-lg text-red-400 hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                              title="刪除此筆訂單">
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <button onClick={() => isAdmin && updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', order.id), { isPaid: !order.isPaid })}
