@@ -488,14 +488,14 @@ const App = () => {
 
   // ── Theme helpers ──
   const bg = isDarkMode ? 'bg-zinc-900' : 'bg-orange-50';
-  const cardBg = isDarkMode ? 'bg-zinc-800/80' : 'bg-white';
-  const cardBorder = isDarkMode ? 'border-zinc-700/50' : 'border-zinc-200/60';
-  const inputBg = isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-100' : 'bg-zinc-50 border-zinc-200 text-zinc-800';
+  const cardBg = isDarkMode ? 'bg-zinc-800/80' : 'bg-white shadow-[0_10px_30px_rgba(124,45,18,0.08)]';
+  const cardBorder = isDarkMode ? 'border-zinc-700/50' : 'border-orange-200/80';
+  const inputBg = isDarkMode ? 'bg-zinc-700 border-zinc-600 text-zinc-100' : 'bg-white border-orange-200/80 text-zinc-800';
   const textPrimary = isDarkMode ? 'text-zinc-100' : 'text-zinc-800';
   const textSecondary = isDarkMode ? 'text-zinc-400' : 'text-zinc-500';
   const accent = 'text-orange-600';
   const accentBg = 'bg-orange-600';
-  const accentLight = isDarkMode ? 'bg-orange-500/10' : 'bg-orange-50';
+  const accentLight = isDarkMode ? 'bg-orange-500/10' : 'bg-white shadow-[0_10px_30px_rgba(124,45,18,0.08)]';
 
   if (isAuthLoading) {
     return (
@@ -1149,6 +1149,7 @@ const App = () => {
 
       <footer className={`py-10 text-center ${textSecondary}`}>
         <p className="text-xs">Bear Joy Lunch &middot; 熊樂子午餐</p>
+        <p className="mt-1 text-xs">作者：牛牛</p>
       </footer>
 
       <style>{`
