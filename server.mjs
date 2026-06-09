@@ -314,9 +314,14 @@ async function getDbdPushedItems() {
   for (const order of dbdOrders) {
     try {
       const data = await dbdFetch(`/order/${order.orderHashId}/buyer-for-buyer?expand=true&sortByName=false`);
-      const buyers = data.data || [];
-      for (const buyer of buyers) {
+      console.log('buyer-for-buyer response keys:', JSON.stringify(Object.keys(data.data || data)));
+      const buyers = data.data?.buyers || data.data || [];
+      if (!Array.isArray(buyers)) {
+        console.log('buyer-for-buyer data structure:', JSON.stringify(data.data).substring(0, 500));
+      }
+      for (const buyer of (Array.isArray(buyers) ? buyers : [])) {
         const items = buyer.orderItems || buyer.items || [];
+        console.log(`buyer ${buyer.playedName || buyer.name}: ${items.length} items, keys:`, JSON.stringify(Object.keys(buyer)));
         for (const item of items) {
           allItems.push({
             orderHashId: order.orderHashId,
