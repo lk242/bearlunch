@@ -342,18 +342,25 @@ async function pushOrders(agentName) {
           buyerInfo: null, addMisc: null, shopRevisionNo
         })
       });
-      const dbdItemIds = extractOrderItemIds(addResult);
-      const dbdItemIdsByOrderId = new Map();
-      orderMap.forEach((order, index) => {
-        const itemId = dbdItemIds[index];
-        if (!itemId) return;
-        const ids = dbdItemIdsByOrderId.get(order.id) || [];
-        ids.push(itemId);
-        dbdItemIdsByOrderId.set(order.id, ids);
-      });
-      const isDbdItemIdMapIncomplete = dbdItemIds.length !== allProducts.length;
+      console.log('add-item response:', JSON.stringify(addResult?.data).slice(0, 500));
 
-      // 更新所有相關的 Firebase 訂單
+      // 推送後立即查 buyer-for-buyer，找出代理人名下的所有 itemIds
+      let allDbdItemIds = [];
+      try {
+        const bfb = await dbdFetch(`/order/${dbdOrder.orderHashId}/buyer-for-buyer?expand=true&sortByName=false`);
+        const buyers = bfb.data?.rows || [];
+        const agentBuyer = buyers.find(b => b.name === agentName);
+        if (agentBuyer) {
+          for (const item of (agentBuyer.items || [])) {
+            allDbdItemIds.push(...(item.orderItemIds || []));
+          }
+        }
+        console.log(`buyer-for-buyer: agent="${agentName}" found ${allDbdItemIds.length} item IDs`);
+      } catch (e2) {
+        console.error('buyer-for-buyer query failed:', e2.message);
+      }
+
+      // 更新所有相關的 Firebase 訂單（共用同一組 itemIds）
       const updatedIds = new Set();
       for (const order of orderMap) {
         if (updatedIds.has(order.id)) continue;
@@ -361,8 +368,7 @@ async function pushOrders(agentName) {
         await updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'orders', order.id), {
           pushedToDbd: true, pushedAt: Date.now(),
           dbdOrderHashId: dbdOrder.orderHashId,
-          dbdOrderItemIds: dbdItemIdsByOrderId.get(order.id) || [],
-          dbdOrderItemIdMapIncomplete: isDbdItemIdMapIncomplete
+          dbdOrderItemIds: allDbdItemIds
         });
         results.push({ user: order.userName, status: 'ok', items: allProducts.filter((_, i) => orderMap[i].id === order.id).map(p => p.productName) });
         pushed++;
