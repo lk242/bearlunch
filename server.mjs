@@ -444,6 +444,28 @@ async function cancelDbdItems(orderHashId, orderItemIds) {
   return { success: true, data: result.data, message: `已取消 ${orderItemIds.length} 個品項` };
 }
 
+async function clearOrders() {
+  const ordersCol = collection(db, 'artifacts', APP_ID, 'public', 'data', 'orders');
+  const snapshot = await getDocs(ordersCol);
+  if (snapshot.empty) return { success: true, message: '沒有訂單需要清理', cleared: 0 };
+  const batch = writeBatch(db);
+  snapshot.docs.forEach(d => batch.delete(d.ref));
+  await batch.commit();
+  console.log(`🗑️ 已清理 ${snapshot.size} 筆訂單`);
+  return { success: true, message: `已清理 ${snapshot.size} 筆訂單`, cleared: snapshot.size };
+}
+
+async function clearMenu() {
+  const menuCol = collection(db, 'artifacts', APP_ID, 'public', 'data', 'menu');
+  const snapshot = await getDocs(menuCol);
+  if (snapshot.empty) return { success: true, message: '沒有菜單需要清理', cleared: 0 };
+  const batch = writeBatch(db);
+  snapshot.docs.forEach(d => batch.delete(d.ref));
+  await batch.commit();
+  console.log(`🗑️ 已清理 ${snapshot.size} 個菜單品項`);
+  return { success: true, message: `已清理 ${snapshot.size} 個菜單品項`, cleared: snapshot.size };
+}
+
 // ── Express App ────────────────────────────────────────────
 
 const app = express();
@@ -554,6 +576,8 @@ function watchScheduleConfig() {
     const data = snap.data() || {};
     const syncTime = data.autoSyncTime || '';
     const pushTime = data.autoPushTime || '';
+    const clearOrdersTime = data.autoClearOrdersTime || '';
+    const clearMenuTime = data.autoClearMenuTime || '';
     const agentName = data.agentName || '';
 
     if (syncTime !== lastScheduleConfig.syncTime) {
@@ -563,6 +587,14 @@ function watchScheduleConfig() {
     if (pushTime !== lastScheduleConfig.pushTime) {
       setupSchedule('push', pushTime, () => pushOrders());
       lastScheduleConfig.pushTime = pushTime;
+    }
+    if (clearOrdersTime !== lastScheduleConfig.clearOrdersTime) {
+      setupSchedule('clearOrders', clearOrdersTime, clearOrders);
+      lastScheduleConfig.clearOrdersTime = clearOrdersTime;
+    }
+    if (clearMenuTime !== lastScheduleConfig.clearMenuTime) {
+      setupSchedule('clearMenu', clearMenuTime, clearMenu);
+      lastScheduleConfig.clearMenuTime = clearMenuTime;
     }
     lastScheduleConfig.agentName = agentName;
   });

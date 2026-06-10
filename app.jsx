@@ -134,6 +134,8 @@ const App = () => {
   const [agentName, setAgentName] = useState('');
   const [autoSyncTime, setAutoSyncTime] = useState('');
   const [autoPushTime, setAutoPushTime] = useState('');
+  const [autoClearOrdersTime, setAutoClearOrdersTime] = useState('');
+  const [autoClearMenuTime, setAutoClearMenuTime] = useState('');
   const [scheduleLastRunAt, setScheduleLastRunAt] = useState({});
   const [scheduleLastResult, setScheduleLastResult] = useState({});
 
@@ -240,6 +242,8 @@ const App = () => {
         if (data.agentName !== undefined) setAgentName(data.agentName || '');
         if (data.autoSyncTime !== undefined) setAutoSyncTime(data.autoSyncTime || '');
         if (data.autoPushTime !== undefined) setAutoPushTime(data.autoPushTime || '');
+        if (data.autoClearOrdersTime !== undefined) setAutoClearOrdersTime(data.autoClearOrdersTime || '');
+        if (data.autoClearMenuTime !== undefined) setAutoClearMenuTime(data.autoClearMenuTime || '');
         setScheduleLastRunAt(data.scheduleLastRunAt || {});
         setScheduleLastResult(data.scheduleLastResult || {});
       }
@@ -1011,6 +1015,40 @@ const App = () => {
                     {scheduleLastRunAt.push && (
                       <p className={`text-xs mt-1 ${textSecondary}`}>上次執行：{formatDeadlineLabel(new Date(scheduleLastRunAt.push))}，{scheduleLastResult.push || '完成'}</p>
                     )}
+                  </div>
+                  <div>
+                    <label className={`text-xs font-medium ${textSecondary} mb-1.5 block`}>定時清理訂單</label>
+                    <div className="flex gap-2">
+                      <input type="time" value={autoClearOrdersTime} onChange={e => setAutoClearOrdersTime(e.target.value)}
+                        className={`flex-1 px-4 py-2.5 rounded-xl border outline-none text-sm ${inputBg} focus:ring-2 focus:ring-orange-500/30`} />
+                      <button onClick={async () => {
+                        try {
+                          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'settings'), { autoClearOrdersTime }, { merge: true });
+                          showNotify(autoClearOrdersTime ? `已設定每天 ${autoClearOrdersTime} 自動清理訂單` : '已關閉自動清理訂單');
+                        } catch { showNotify('儲存失敗'); }
+                      }} className={`px-3 py-2.5 ${accentBg} text-white rounded-xl text-sm font-medium hover:bg-orange-700 transition-colors`}>
+                        儲存
+                      </button>
+                    </div>
+                    {autoClearOrdersTime && <p className={`text-xs mt-1 ${textSecondary}`}>每天 {autoClearOrdersTime} 自動清空所有訂單</p>}
+                    {!autoClearOrdersTime && <p className={`text-xs mt-1 ${textSecondary}`}>留空則不自動清理</p>}
+                  </div>
+                  <div>
+                    <label className={`text-xs font-medium ${textSecondary} mb-1.5 block`}>定時清理菜單</label>
+                    <div className="flex gap-2">
+                      <input type="time" value={autoClearMenuTime} onChange={e => setAutoClearMenuTime(e.target.value)}
+                        className={`flex-1 px-4 py-2.5 rounded-xl border outline-none text-sm ${inputBg} focus:ring-2 focus:ring-orange-500/30`} />
+                      <button onClick={async () => {
+                        try {
+                          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'settings'), { autoClearMenuTime }, { merge: true });
+                          showNotify(autoClearMenuTime ? `已設定每天 ${autoClearMenuTime} 自動清理菜單` : '已關閉自動清理菜單');
+                        } catch { showNotify('儲存失敗'); }
+                      }} className={`px-3 py-2.5 ${accentBg} text-white rounded-xl text-sm font-medium hover:bg-orange-700 transition-colors`}>
+                        儲存
+                      </button>
+                    </div>
+                    {autoClearMenuTime && <p className={`text-xs mt-1 ${textSecondary}`}>每天 {autoClearMenuTime} 自動清空菜單</p>}
+                    {!autoClearMenuTime && <p className={`text-xs mt-1 ${textSecondary}`}>留空則不自動清理</p>}
                   </div>
                 </div>
               </div>
