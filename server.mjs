@@ -536,12 +536,13 @@ async function runScheduledTask(type, timeStr, fn) {
   const nowParts = getTaipeiDateParts();
   const configSnap = await getDoc(configRef);
   const config = configSnap.data() || {};
-  if (config.scheduleRuns?.[type] === nowParts.dateKey) return;
+  const runKey = `${nowParts.dateKey}@${timeStr}`;
+  if (config.scheduleRuns?.[type] === runKey) return;
 
   console.log(`⏰ 定時排程觸發：${type} (${timeStr}, ${DISPLAY_TIME_ZONE})`);
   const result = await fn();
   await setDoc(configRef, {
-    scheduleRuns: { [type]: nowParts.dateKey },
+    scheduleRuns: { [type]: runKey },
     scheduleLastRunAt: { [type]: Date.now() },
     scheduleLastResult: { [type]: result?.message || '完成' }
   }, { merge: true });
