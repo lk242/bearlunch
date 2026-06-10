@@ -390,7 +390,7 @@ async function getDbdPushedItems() {
   fbSnapshot.docs.forEach(d => {
     const data = d.data();
     if (data.pushedToDbd && data.dbdOrderItemIds) {
-      data.dbdOrderItemIds.forEach(id => pushedItemIds.add(id));
+      data.dbdOrderItemIds.forEach(id => pushedItemIds.add(String(id)));
     }
   });
   console.log('Firebase pushed IDs:', JSON.stringify([...pushedItemIds]));
@@ -401,12 +401,13 @@ async function getDbdPushedItems() {
       const data = await dbdFetch(`/order/${order.orderHashId}/buyer-for-buyer?expand=true&sortByName=false`);
       // DinBenDon 回傳格式: data.rows = [{name, items: [{orderItemIds, mergedName, ...}]}]
       const buyers = data.data?.rows || [];
+      console.log(`DinBenDon order ${order.orderHashId}: ${buyers.length} buyers`);
       for (const buyer of buyers) {
         const items = buyer.items || [];
         for (const item of items) {
           const itemIds = item.orderItemIds || [];
-          // 用 Firebase 紀錄比對：只顯示 bearlunch 推送過的品項
-          const isOurs = itemIds.some(id => pushedItemIds.has(id));
+          console.log(`  buyer=${buyer.name}, item=${item.mergedName}, ids=[${itemIds}], match=${itemIds.some(id => pushedItemIds.has(String(id)))}`);
+          const isOurs = itemIds.some(id => pushedItemIds.has(String(id)));
           if (!isOurs) continue;
           allItems.push({
             orderHashId: order.orderHashId,
