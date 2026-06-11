@@ -806,7 +806,11 @@ const App = () => {
                       尚未匯入菜單
                     </div>
                   ) : (
-                    Object.entries(menuByShop).map(([shopName, items]) => {
+                    (() => {
+                      const entries = Object.entries(menuByShop);
+                      const dbdShops = entries.filter(([, items]) => !items.some(i => i.custom));
+                      const customShops = entries.filter(([, items]) => items.some(i => i.custom));
+                      const renderShop = ([shopName, items]) => {
                       const isCustom = items.some(i => i.custom);
                       const isFreeForm = items.some(i => i.isMarker && i.freeForm);
                       const owner = items.find(i => i.custom)?.owner;
@@ -866,7 +870,18 @@ const App = () => {
                         )}
                       </div>
                       );
-                    })
+                      };
+                      return (<>
+                        {dbdShops.length > 0 && (
+                          <div className={`text-[11px] font-semibold pt-1 ${textSecondary}`}>🍱 DinBenDon 訂購</div>
+                        )}
+                        {dbdShops.map(renderShop)}
+                        {customShops.length > 0 && (
+                          <div className={`text-[11px] font-semibold pt-2 ${textSecondary}`}>🙌 開團訂購（不推送 DinBenDon）</div>
+                        )}
+                        {customShops.map(renderShop)}
+                      </>);
+                    })()
                   )}
                 </div>
 
