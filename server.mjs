@@ -308,74 +308,78 @@ async function pushOrders(agentName) {
     const categories = menuData?.shop?.categories || [];
     const shopRevisionNo = menuData?.shop?.revisionNo || 0;
 
-    // 總代理人制：合併同店所有品項為一次推送，備註寫個人名
-    const allProducts = [];
-    const orderMap = []; // 追蹤每個 product 對應的 Firebase order
+    // 查詢代理人名下目前已有的 itemIds，後續用差集找出每個人新增的品項
+    const getAgentItemIds = async () => {
+      const bfb = await dbdFetch(`/order/${dbdOrder.orderHashId}/buyer-for-buyer?expand=true&sortByName=false`);
+      const buyers = bfb.data?.rows || [];
+      const ids = [];
+      for (const buyer of buyers) {
+        if (buyer.name !== agentName) continue;
+        for (const item of (buyer.items || [])) ids.push(...(item.orderItemIds || []));
+      }
+      return ids;
+    };
 
+    let knownIds;
+    try {
+      knownIds = new Set(await getAgentItemIds());
+    } catch { knownIds = new Set(); }
+
+    // 總代理人制：每位訂購者各發一次 add-item（同品項才不會被 DinBenDon 合併），
+    // 訂購人都是代理人名，備註填個人名
     for (const order of shopOrders) {
       const items = order.items || [{ name: order.itemName, price: order.price }];
+      const addProducts = [];
+
       for (const item of items) {
         const match = findProduct(item.name, item.price, categories);
         if (match) {
-          allProducts.push({
+          addProducts.push({
             productId: match.product.id, variationId: match.variation.id,
             qty: 1, comment: order.userName || '未知',
             categoryName: match.categoryName,
             productName: match.product.name, variationName: match.variation.name || '',
             price: match.variation.price
           });
-          orderMap.push(order);
         } else {
           results.push({ user: order.userName, status: 'skip', reason: `品項「${item.name}」比對失敗` });
           failed++;
         }
       }
-    }
 
-    if (allProducts.length === 0) continue;
+      if (addProducts.length === 0) continue;
 
-    try {
-      const addResult = await dbdFetch(`/order/${dbdOrder.orderHashId}/add-item`, {
-        method: 'POST',
-        body: JSON.stringify({
-          addProducts: allProducts, playedName: agentName,
-          buyerInfo: null, addMisc: null, shopRevisionNo
-        })
-      });
-      console.log('add-item response:', JSON.stringify(addResult?.data).slice(0, 500));
-
-      // 推送後立即查 buyer-for-buyer，找出代理人名下的所有 itemIds
-      let allDbdItemIds = [];
       try {
-        const bfb = await dbdFetch(`/order/${dbdOrder.orderHashId}/buyer-for-buyer?expand=true&sortByName=false`);
-        const buyers = bfb.data?.rows || [];
-        const agentBuyer = buyers.find(b => b.name === agentName);
-        if (agentBuyer) {
-          for (const item of (agentBuyer.items || [])) {
-            allDbdItemIds.push(...(item.orderItemIds || []));
-          }
-        }
-        console.log(`buyer-for-buyer: agent="${agentName}" found ${allDbdItemIds.length} item IDs`);
-      } catch (e2) {
-        console.error('buyer-for-buyer query failed:', e2.message);
-      }
+        await dbdFetch(`/order/${dbdOrder.orderHashId}/add-item`, {
+          method: 'POST',
+          body: JSON.stringify({
+            addProducts, playedName: agentName,
+            buyerInfo: null, addMisc: null, shopRevisionNo
+          })
+        });
 
-      // 更新所有相關的 Firebase 訂單（共用同一組 itemIds）
-      const updatedIds = new Set();
-      for (const order of orderMap) {
-        if (updatedIds.has(order.id)) continue;
-        updatedIds.add(order.id);
+        // 用差集找出這次新增的 itemIds，存到該訂購者的 Firebase 訂單
+        let newIds = [];
+        try {
+          const currentIds = await getAgentItemIds();
+          newIds = currentIds.filter(id => !knownIds.has(id));
+          newIds.forEach(id => knownIds.add(id));
+        } catch (e2) {
+          console.error('buyer-for-buyer query failed:', e2.message);
+        }
+        console.log(`已推送 ${order.userName}: ${addProducts.map(p => p.productName).join(', ')} → ids=[${newIds}]`);
+
         await updateDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'orders', order.id), {
           pushedToDbd: true, pushedAt: Date.now(),
           dbdOrderHashId: dbdOrder.orderHashId,
-          dbdOrderItemIds: allDbdItemIds
+          dbdOrderItemIds: newIds
         });
-        results.push({ user: order.userName, status: 'ok', items: allProducts.filter((_, i) => orderMap[i].id === order.id).map(p => p.productName) });
+        results.push({ user: order.userName, status: 'ok', items: addProducts.map(p => p.productName) });
         pushed++;
+      } catch (e) {
+        results.push({ user: order.userName, status: 'error', reason: e.message });
+        failed++;
       }
-    } catch (e) {
-      shopOrders.forEach(o => results.push({ user: o.userName, status: 'error', reason: e.message }));
-      failed += shopOrders.length;
     }
   }
 
@@ -393,10 +397,14 @@ async function getDbdPushedItems() {
   const ordersCol = collection(db, 'artifacts', APP_ID, 'public', 'data', 'orders');
   const fbSnapshot = await getDocs(ordersCol);
   const pushedItemIds = new Set();
+  const itemIdToUser = new Map(); // itemId → 訂購者姓名
   fbSnapshot.docs.forEach(d => {
     const data = d.data();
     if (data.pushedToDbd && data.dbdOrderItemIds) {
-      data.dbdOrderItemIds.forEach(id => pushedItemIds.add(String(id)));
+      data.dbdOrderItemIds.forEach(id => {
+        pushedItemIds.add(String(id));
+        itemIdToUser.set(String(id), data.userName || '');
+      });
     }
   });
   console.log('Firebase pushed IDs:', JSON.stringify([...pushedItemIds]));
@@ -415,6 +423,9 @@ async function getDbdPushedItems() {
           console.log(`  buyer=${buyer.name}, item=${item.mergedName}, ids=[${itemIds}], match=${itemIds.some(id => pushedItemIds.has(String(id)))}`);
           const isOurs = itemIds.some(id => pushedItemIds.has(String(id)));
           if (!isOurs) continue;
+          // 備註（訂購者姓名）：優先用 DinBenDon 的 comment，否則用 Firebase 對照
+          const comment = item.comment || item.note ||
+            itemIds.map(id => itemIdToUser.get(String(id))).filter(Boolean).join('、') || '';
           allItems.push({
             orderHashId: order.orderHashId,
             shopName: order.shopName,
@@ -425,6 +436,7 @@ async function getDbdPushedItems() {
             price: item.total ?? item.price ?? 0,
             qty: item.size || item.qty || 1,
             playedName: buyer.name || '未知',
+            comment,
             canCancel: item.cancelable === true  // 同 session 才能取消
           });
         }

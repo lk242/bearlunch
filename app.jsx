@@ -1113,7 +1113,9 @@ const App = () => {
                           <span className="font-medium">{item.productName}</span>
                           {item.variationName && <span className={`ml-1 ${textSecondary}`}>({item.variationName})</span>}
                           <span className="ml-2 text-orange-500 font-mono">${item.price}</span>
-                          <span className={`ml-2 text-xs ${textSecondary}`}>{item.playedName}</span>
+                          {item.comment
+                            ? <span className={`ml-2 text-xs font-medium ${isDarkMode ? 'text-amber-400' : 'text-amber-600'}`}>📝 {item.comment}</span>
+                            : <span className={`ml-2 text-xs ${textSecondary}`}>{item.playedName}</span>}
                         </div>
                         {item.orderItemId && item.canCancel && (
                           <button
