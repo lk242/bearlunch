@@ -52,6 +52,27 @@ import {
   AlertCircle
 } from 'lucide-react';
 
+// 開團用的內建店家菜單範本（價格僅供參考，開團後可用貼上模式覆蓋）
+const MENU_TEMPLATES = {
+  '麥當勞': [
+    { name: '大麥克 (單點)', price: 78 }, { name: '大麥克經典套餐', price: 139 },
+    { name: '雙層牛肉吉事堡 (單點)', price: 62 }, { name: '雙層牛肉吉事堡經典套餐', price: 123 },
+    { name: '麥香雞 (單點)', price: 48 }, { name: '麥香雞經典套餐', price: 109 },
+    { name: '麥香魚 (單點)', price: 52 }, { name: '麥香魚經典套餐', price: 113 },
+    { name: '勁辣雞腿堡 (單點)', price: 82 }, { name: '勁辣雞腿堡經典套餐', price: 143 },
+    { name: '板烤雞腿堡 (單點)', price: 82 }, { name: '板烤雞腿堡經典套餐', price: 143 },
+    { name: '嫩煎雞腿堡 (單點)', price: 92 }, { name: '嫩煎雞腿堡經典套餐', price: 153 },
+    { name: '六塊麥克鷄塊 (單點)', price: 68 }, { name: '六塊麥克鷄塊經典套餐', price: 129 },
+    { name: '麥脆鷄腿 2塊 (單點)', price: 96 },
+    { name: '中薯條', price: 45 }, { name: '大薯條', price: 58 },
+    { name: '玉米湯', price: 38 }, { name: '蘋果派', price: 35 },
+    { name: 'OREO冰炫風', price: 55 },
+    { name: '可口可樂 (中)', price: 35 }, { name: '雪碧 (中)', price: 35 },
+    { name: '冰紅茶 (中)', price: 25 }, { name: '熱美式咖啡 (中)', price: 45 },
+    { name: '冰拿鐵 (中)', price: 60 }
+  ]
+};
+
 const getFirebaseConfig = () => {
   if (typeof __firebase_config !== 'undefined' && __firebase_config) {
     try {
@@ -136,6 +157,10 @@ const App = () => {
   const [autoPushTime, setAutoPushTime] = useState('');
   const [autoClearOrdersTime, setAutoClearOrdersTime] = useState('');
   const [autoClearMenuTime, setAutoClearMenuTime] = useState('');
+
+  // 開團（自訂店家，不推送 DinBenDon）
+  const [groupModal, setGroupModal] = useState({ show: false, shopName: '', mode: 'free', text: '', template: '' });
+  const [freeItemInputs, setFreeItemInputs] = useState({}); // { [shopName]: { name, price } }
   const [scheduleLastRunAt, setScheduleLastRunAt] = useState({});
   const [scheduleLastResult, setScheduleLastResult] = useState({});
 
@@ -344,6 +369,7 @@ const App = () => {
 
     await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), {
       userName, extensionId: userExtension, shopName: cart[0].shopName, itemName: combinedNames,
+      customShop: !!cart[0].custom,
       items: cart.map(i => ({ name: i.name, price: i.price })),
       price: amountDue, paidAmount: paid, change: paid > amountDue ? paid - amountDue : 0,
       isPaid: false, isChangeGiven: false, createdAt: Date.now(),
@@ -377,6 +403,52 @@ const App = () => {
       else { showNotify('格式無法辨識，請確認內容'); }
     } catch (err) { showNotify("匯入失敗"); }
     finally { setIsSyncing(false); }
+  };
+
+  const handleCreateGroup = async () => {
+    if (!user) return;
+    if (!userName.trim()) return showNotify('請先填寫你的姓名再開團');
+    const shopName = groupModal.shopName.trim();
+    if (!shopName) return showNotify('請填寫店家名稱');
+    if (menuByShop[shopName]) return showNotify('這個店家已存在，直接點餐即可');
+
+    try {
+      const batch = writeBatch(db);
+      const menuCol = collection(db, 'artifacts', appId, 'public', 'data', 'menu');
+      const base = { shopName, custom: true, owner: userName, createdAt: Date.now() };
+      let count = 0;
+
+      if (groupModal.mode === 'template') {
+        const items = MENU_TEMPLATES[groupModal.template] || [];
+        if (items.length === 0) return showNotify('請選擇範本');
+        items.forEach(it => { batch.set(doc(menuCol), { ...base, name: it.name, price: it.price }); count++; });
+      } else if (groupModal.mode === 'paste') {
+        groupModal.text.split('\n').forEach(line => {
+          const m = line.trim().match(/^(.*?)[\s\t]+(\d{1,4})\s*元?\s*$/);
+          if (m) { batch.set(doc(menuCol), { ...base, name: m[1].trim(), price: parseInt(m[2]) }); count++; }
+        });
+        if (count === 0) return showNotify('格式無法辨識，每行請填「品名 價格」');
+      } else {
+        // 自由填寫：只建立店家標記，點的人自己輸入品項
+        batch.set(doc(menuCol), { ...base, name: '__group__', price: 0, isMarker: true, freeForm: true });
+        count = 1;
+      }
+
+      await batch.commit();
+      setGroupModal({ show: false, shopName: '', mode: 'free', text: '', template: '' });
+      setExpandedShops(p => ({ ...p, [shopName]: true }));
+      showNotify(`已開團「${shopName}」！`);
+    } catch (e) { showNotify('開團失敗'); }
+  };
+
+  const addFreeItemToCart = (shopName) => {
+    const input = freeItemInputs[shopName] || {};
+    const name = (input.name || '').trim();
+    const price = parseInt(input.price);
+    if (!name) return showNotify('請輸入品項名稱');
+    if (!price || price <= 0) return showNotify('請輸入正確的價格');
+    addToCart({ shopName, name, price, custom: true });
+    setFreeItemInputs(p => ({ ...p, [shopName]: { name: '', price: '' } }));
   };
 
   const executeClearCloud = async (type) => {
@@ -547,6 +619,74 @@ const App = () => {
         </div>
       )}
 
+      {/* 開團 modal */}
+      {groupModal.show && (
+        <div className="fixed inset-0 z-[150] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`${cardBg} border ${cardBorder} p-6 rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] overflow-y-auto`}>
+            <div className="flex justify-between items-center mb-5">
+              <h3 className="text-lg font-bold">我要開團</h3>
+              <button onClick={() => setGroupModal(p => ({ ...p, show: false }))} className={`p-1 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-700 ${textSecondary}`}><X size={18} /></button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className={`text-xs font-medium mb-1.5 block ${textSecondary}`}>店家名稱</label>
+                <input type="text" value={groupModal.shopName} placeholder="例如：麥當勞、五十嵐"
+                  onChange={e => setGroupModal(p => ({ ...p, shopName: e.target.value }))}
+                  className={`w-full px-4 py-2.5 rounded-xl border outline-none text-sm focus:ring-2 focus:ring-orange-500/30 ${inputBg}`} />
+              </div>
+              <div>
+                <label className={`text-xs font-medium mb-1.5 block ${textSecondary}`}>菜單方式</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: 'free', label: '自由填寫' },
+                    { id: 'template', label: '內建範本' },
+                    { id: 'paste', label: '貼上菜單' },
+                  ].map(m => (
+                    <button key={m.id} onClick={() => setGroupModal(p => ({ ...p, mode: m.id }))}
+                      className={`py-2 rounded-lg text-xs font-medium border transition-colors ${
+                        groupModal.mode === m.id
+                          ? `${accentBg} text-white border-transparent`
+                          : `${cardBorder} ${textSecondary} ${isDarkMode ? 'hover:bg-zinc-700' : 'hover:bg-zinc-50'}`
+                      }`}>{m.label}</button>
+                  ))}
+                </div>
+              </div>
+              {groupModal.mode === 'free' && (
+                <p className={`text-xs ${textSecondary}`}>不需要建菜單 — 點餐的人自己輸入品項名稱和價格，適合品項多的店（麥當勞、手搖飲）。</p>
+              )}
+              {groupModal.mode === 'template' && (
+                <div>
+                  <label className={`text-xs font-medium mb-1.5 block ${textSecondary}`}>選擇範本</label>
+                  <div className="flex gap-2 flex-wrap">
+                    {Object.keys(MENU_TEMPLATES).map(t => (
+                      <button key={t} onClick={() => setGroupModal(p => ({ ...p, template: t, shopName: p.shopName || t }))}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                          groupModal.template === t
+                            ? `${accentBg} text-white border-transparent`
+                            : `${cardBorder} ${textSecondary}`
+                        }`}>{t}</button>
+                    ))}
+                  </div>
+                  <p className={`text-xs mt-2 ${textSecondary}`}>範本價格僅供參考，若有出入可改用「貼上菜單」自訂。</p>
+                </div>
+              )}
+              {groupModal.mode === 'paste' && (
+                <div>
+                  <label className={`text-xs font-medium mb-1.5 block ${textSecondary}`}>菜單內容（每行一項：品名 價格）</label>
+                  <textarea rows="6" value={groupModal.text} placeholder={'大麥克 78\n中薯條 45\n冰紅茶 25'}
+                    onChange={e => setGroupModal(p => ({ ...p, text: e.target.value }))}
+                    className={`w-full px-4 py-3 rounded-xl border outline-none text-sm font-mono focus:ring-2 focus:ring-orange-500/30 ${inputBg}`} />
+                </div>
+              )}
+              <p className={`text-xs ${textSecondary}`}>開團的店不會推送到 DinBenDon，請開團人自行下單（統整頁會幫你算好品項和金額）。</p>
+              <button onClick={handleCreateGroup} className={`w-full py-3 ${accentBg} text-white rounded-xl font-semibold hover:bg-orange-700 transition-colors`}>
+                建立開團
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Confirm modal */}
       {confirmModal.show && (
         <div className="fixed inset-0 z-[140] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
@@ -666,7 +806,13 @@ const App = () => {
                       尚未匯入菜單
                     </div>
                   ) : (
-                    Object.entries(menuByShop).map(([shopName, items]) => (
+                    Object.entries(menuByShop).map(([shopName, items]) => {
+                      const isCustom = items.some(i => i.custom);
+                      const isFreeForm = items.some(i => i.isMarker && i.freeForm);
+                      const owner = items.find(i => i.custom)?.owner;
+                      const visibleItems = items.filter(i => !i.isMarker);
+                      const freeInput = freeItemInputs[shopName] || { name: '', price: '' };
+                      return (
                       <div key={shopName} className={`border rounded-xl overflow-hidden ${cardBorder}`}>
                         <button onClick={() => setExpandedShops(p => ({ ...p, [shopName]: !p[shopName] }))}
                           className={`w-full px-4 py-3 flex justify-between items-center text-sm font-semibold transition-colors ${
@@ -677,12 +823,17 @@ const App = () => {
                           <div className="flex items-center gap-2">
                             <Store size={14} />
                             {shopName}
+                            {isCustom && (
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-normal ${
+                                expandedShops[shopName] ? 'bg-white/20 text-white' : (isDarkMode ? 'bg-amber-500/15 text-amber-400' : 'bg-amber-100 text-amber-700')
+                              }`}>開團{owner ? `・${owner}` : ''}</span>
+                            )}
                           </div>
                           {expandedShops[shopName] ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                         </button>
                         {expandedShops[shopName] && (
                           <div className="p-1.5 space-y-1">
-                            {items.map(item => (
+                            {visibleItems.map(item => (
                               <button key={item.id} onClick={() => addToCart(item)}
                                 className={`w-full px-3 py-2.5 rounded-lg border flex justify-between items-center text-sm transition-colors ${
                                   isDarkMode ? 'border-zinc-700 hover:border-orange-600/40 hover:bg-orange-500/5' : 'border-zinc-100 hover:border-orange-300 hover:bg-orange-50'
@@ -694,12 +845,38 @@ const App = () => {
                                 </div>
                               </button>
                             ))}
+                            {isFreeForm && (
+                              <div className={`px-3 py-2.5 rounded-lg border ${isDarkMode ? 'border-zinc-700' : 'border-zinc-100'}`}>
+                                <p className={`text-[11px] mb-1.5 ${textSecondary}`}>自由填寫 — 輸入你要點的品項和價格</p>
+                                <div className="flex gap-1.5">
+                                  <input type="text" value={freeInput.name} placeholder="品項名稱"
+                                    onChange={e => setFreeItemInputs(p => ({ ...p, [shopName]: { ...freeInput, name: e.target.value } }))}
+                                    className={`flex-1 min-w-0 px-2.5 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-orange-500/30 ${inputBg}`} />
+                                  <input type="number" value={freeInput.price} placeholder="$"
+                                    onChange={e => setFreeItemInputs(p => ({ ...p, [shopName]: { ...freeInput, price: e.target.value } }))}
+                                    className={`w-20 px-2.5 py-2 rounded-lg border text-sm outline-none focus:ring-2 focus:ring-orange-500/30 ${inputBg}`} />
+                                  <button onClick={() => addFreeItemToCart(shopName)} disabled={isTimeLocked}
+                                    className={`px-3 py-2 rounded-lg ${accentBg} text-white hover:bg-orange-700 transition-colors ${isTimeLocked ? 'opacity-40 cursor-not-allowed' : ''}`}>
+                                    <Plus size={14} />
+                                  </button>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
+
+                {/* 開團按鈕 */}
+                <button onClick={() => setGroupModal({ show: true, shopName: '', mode: 'free', text: '', template: '' })}
+                  className={`w-full mt-2 py-2.5 rounded-xl border-2 border-dashed text-sm font-medium flex items-center justify-center gap-1.5 transition-colors ${
+                    isDarkMode ? 'border-zinc-700 text-zinc-400 hover:border-amber-600/50 hover:text-amber-400' : 'border-zinc-200 text-zinc-500 hover:border-amber-400 hover:text-amber-600'
+                  }`}>
+                  <Plus size={14} /> 我要開團（麥當勞、手搖飲等外送）
+                </button>
 
                 {/* Cart */}
                 {cart.length > 0 && (

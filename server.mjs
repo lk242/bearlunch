@@ -201,9 +201,11 @@ async function syncMenu(clearFirst) {
 
   if (clearFirst) {
     const snapshot = await getDocs(menuCol);
-    if (!snapshot.empty) {
+    // 只清 DinBenDon 同步的菜單，保留自訂開團（custom）
+    const toDelete = snapshot.docs.filter(d => !d.data().custom);
+    if (toDelete.length > 0) {
       const batch = writeBatch(db);
-      snapshot.docs.forEach(d => batch.delete(d.ref));
+      toDelete.forEach(d => batch.delete(d.ref));
       await batch.commit();
     }
   }
@@ -276,7 +278,8 @@ async function pushOrders(agentName) {
   const ordersCol = collection(db, 'artifacts', APP_ID, 'public', 'data', 'orders');
   const snapshot = await getDocs(ordersCol);
   const fbOrders = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-  const unpushed = fbOrders.filter(o => !o.pushedToDbd);
+  // customShop = 自訂開團（麥當勞等），不推送 DinBenDon
+  const unpushed = fbOrders.filter(o => !o.pushedToDbd && !o.customShop);
 
   if (unpushed.length === 0) return { success: true, message: '所有訂單都已推送', pushed: 0, failed: 0 };
 
