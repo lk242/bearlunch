@@ -556,11 +556,11 @@ async function runScheduledTask(type, timeStr, fn) {
 
   console.log(`⏰ 定時排程觸發：${type} (${timeStr}, ${DISPLAY_TIME_ZONE})`);
   const result = await fn();
-  await setDoc(configRef, {
-    scheduleRuns: { [type]: runKey },
-    scheduleLastRunAt: { [type]: Date.now() },
-    scheduleLastResult: { [type]: result?.message || '完成' }
-  }, { merge: true });
+  await updateDoc(configRef, {
+    [`scheduleRuns.${type}`]: runKey,
+    [`scheduleLastRunAt.${type}`]: Date.now(),
+    [`scheduleLastResult.${type}`]: result?.message || '完成'
+  });
 }
 
 function setupSchedule(type, timeStr, fn) {
