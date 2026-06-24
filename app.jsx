@@ -280,18 +280,6 @@ const App = () => {
       const sortedData = data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       setOrders(sortedData);
 
-      const today = new Date().toISOString().split('T')[0];
-      const staleOrders = sortedData.filter(o => {
-        if (!o.createdAt) return false;
-        const oDate = new Date(o.createdAt).toISOString().split('T')[0];
-        return oDate !== today;
-      });
-
-      if (staleOrders.length > 0) {
-        const batch = writeBatch(db);
-        staleOrders.forEach(o => batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'orders', o.id)));
-        batch.commit().then(() => showNotify("昨天的訂單已自動清除"));
-      }
     });
 
     const menuRef = collection(db, 'artifacts', appId, 'public', 'data', 'menu');
