@@ -6,10 +6,11 @@
       "**/.*",
       "**/node_modules/**"
     ],
-    "rewrites": [
+    "redirects": [
       {
         "source": "**",
-        "destination": "/index.html"
+        "destination": "https://bearlunch.onrender.com",
+        "type": 302
       }
     ]
   }

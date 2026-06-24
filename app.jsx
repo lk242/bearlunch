@@ -15,6 +15,9 @@ import {
   getAuth,
   signInAnonymously,
   signInWithCustomToken,
+  signInWithPopup,
+  GoogleAuthProvider,
+  signOut,
   onAuthStateChanged
 } from 'firebase/auth';
 import {
@@ -30,6 +33,10 @@ import {
   Loader2,
   Lock,
   Unlock,
+  LogIn,
+  LogOut,
+  Shield,
+  UserPlus,
   X,
   ShoppingCart,
   Minus,
@@ -125,7 +132,6 @@ const App = () => {
 
   const [userName, setUserName] = useState(() => getSafeStorage('bear_joy_name', ''));
   const [userExtension, setUserExtension] = useState(() => getSafeStorage('bear_joy_ext', ''));
-  const [isAdmin, setIsAdmin] = useState(() => getSafeStorage('bear_joy_admin', 'false') === 'true');
 
   const [cart, setCart] = useState([]);
   const [cashGiven, setCashGiven] = useState('');
@@ -134,8 +140,8 @@ const App = () => {
   const [expandedShops, setExpandedShops] = useState({});
   const [isSyncing, setIsSyncing] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(() => getSafeStorage('bear_joy_dark', 'false') === 'true');
-  const [adminPassword, setAdminPassword] = useState('');
-  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [adminEmails, setAdminEmails] = useState([]);
+  const [newAdminEmail, setNewAdminEmail] = useState('');
   const [confirmModal, setConfirmModal] = useState({ show: false, type: '', label: '', data: null });
   const [editModal, setEditModal] = useState({ show: false, orderId: '', amount: '' });
   const [portalReceived, setPortalReceived] = useState(false);
@@ -173,10 +179,14 @@ const App = () => {
     try {
       localStorage.setItem('bear_joy_name', userName);
       localStorage.setItem('bear_joy_ext', userExtension);
-      localStorage.setItem('bear_joy_admin', isAdmin.toString());
       localStorage.setItem('bear_joy_dark', isDarkMode.toString());
     } catch (e) {}
-  }, [userName, userExtension, isAdmin, isDarkMode]);
+  }, [userName, userExtension, isDarkMode]);
+
+  const isAdmin = useMemo(() => {
+    if (!user || !user.email) return false;
+    return adminEmails.includes(user.email.toLowerCase());
+  }, [user, adminEmails]);
 
   const deadlineDate = useMemo(() => {
     // 優先用 DinBenDon 同步的完整時間戳記
@@ -292,7 +302,15 @@ const App = () => {
       }
     });
 
-    return () => { unsubscribeConfig(); unsubscribeOrders(); unsubscribeMenu(); };
+    const adminsRef = doc(db, 'artifacts', appId, 'public', 'data', 'config', 'admins');
+    const unsubscribeAdmins = onSnapshot(adminsRef, (snap) => {
+      if (snap.exists()) {
+        const emails = snap.data().emails || [];
+        setAdminEmails(emails.map(e => e.toLowerCase()));
+      }
+    });
+
+    return () => { unsubscribeConfig(); unsubscribeOrders(); unsubscribeMenu(); unsubscribeAdmins(); };
   }, [user]);
 
   useEffect(() => {
@@ -314,17 +332,57 @@ const App = () => {
     setTimeout(() => setNotification(null), 3000);
   };
 
-  const handleAdminLogin = (e) => {
-    e.preventDefault();
-    if (adminPassword === 'root123456') {
-      setIsAdmin(true); setAdminPassword(''); setShowAdminLogin(false);
-      showNotify("已切換管理員模式");
-    } else { showNotify("密碼不正確"); }
+  const handleGoogleLogin = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      const email = result.user.email?.toLowerCase();
+      // 首次使用：若 admins 文件不存在或為空，第一個登入者自動成為管理員
+      if (adminEmails.length === 0) {
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'admins'), { emails: [email] });
+        showNotify('你是第一位管理員，已自動授權');
+      } else if (!adminEmails.includes(email)) {
+        showNotify('此 Google 帳號沒有管理權限');
+        await signOut(auth);
+        await signInAnonymously(auth);
+        return;
+      } else {
+        showNotify('已登入管理模式');
+      }
+    } catch (e) {
+      if (e.code !== 'auth/popup-closed-by-user') showNotify('Google 登入失敗');
+    }
+  };
+
+  const handleAdminLogout = async () => {
+    try {
+      await signOut(auth);
+      await signInAnonymously(auth);
+      setActiveTab('order');
+      showNotify('已登出管理模式');
+    } catch (e) { showNotify('登出失敗'); }
   };
 
   const toggleAdminMode = () => {
-    if (isAdmin) { setIsAdmin(false); setActiveTab('order'); showNotify("已關閉管理模式"); }
-    else { setShowAdminLogin(true); }
+    if (isAdmin) handleAdminLogout();
+    else handleGoogleLogin();
+  };
+
+  const addAdminEmail = async () => {
+    const email = newAdminEmail.trim().toLowerCase();
+    if (!email || !email.includes('@')) return showNotify('請輸入有效的 Email');
+    if (adminEmails.includes(email)) return showNotify('此 Email 已是管理員');
+    const updated = [...adminEmails, email];
+    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'admins'), { emails: updated });
+    setNewAdminEmail('');
+    showNotify(`已新增管理員：${email}`);
+  };
+
+  const removeAdminEmail = async (email) => {
+    if (user?.email?.toLowerCase() === email) return showNotify('不能移除自己');
+    const updated = adminEmails.filter(e => e !== email);
+    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'admins'), { emails: updated });
+    showNotify(`已移除管理員：${email}`);
   };
 
   const updateDeadline = async (newTime) => {
@@ -591,21 +649,6 @@ const App = () => {
         </div>
       )}
 
-      {/* Admin login modal */}
-      {showAdminLogin && (
-        <div className="fixed inset-0 z-[150] bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className={`${cardBg} border ${cardBorder} p-6 rounded-2xl shadow-xl w-full max-w-sm`}>
-            <div className="flex justify-between items-center mb-5">
-              <h3 className="text-lg font-bold">管理員登入</h3>
-              <button onClick={() => setShowAdminLogin(false)} className={`p-1 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-700 ${textSecondary}`}><X size={18} /></button>
-            </div>
-            <form onSubmit={handleAdminLogin} className="space-y-4">
-              <input autoFocus type="password" placeholder="輸入管理密碼" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} className={`w-full px-4 py-3 rounded-xl border outline-none focus:ring-2 focus:ring-orange-500/40 ${inputBg}`} />
-              <button type="submit" className={`w-full py-3 ${accentBg} text-white rounded-xl font-semibold hover:bg-orange-700 transition-colors`}>登入</button>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* 開團 modal */}
       {groupModal.show && (
@@ -728,7 +771,7 @@ const App = () => {
                 { id: 'admin', label: '設定', icon: Settings, adminOnly: true },
               ].map(tab => (
                 <button key={tab.id} onClick={() => {
-                  if (tab.adminOnly && !isAdmin) { setShowAdminLogin(true); return; }
+                  if (tab.adminOnly && !isAdmin) { handleGoogleLogin(); return; }
                   setActiveTab(tab.id);
                 }} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${activeTab === tab.id ? `${accentBg} text-white` : `${textSecondary} hover:${textPrimary}`}`}>
                   <tab.icon size={14} />
@@ -1053,8 +1096,7 @@ const App = () => {
                     ? 'bg-emerald-500 text-white border-emerald-500'
                     : `${cardBorder} ${textSecondary} hover:border-orange-300`
                 }`}>
-                  {isAdmin ? <Unlock size={12}/> : <Lock size={12}/>}
-                  {isAdmin ? '管理中' : '解鎖'}
+                  {isAdmin ? <><Shield size={12}/> {user?.email?.split('@')[0]}</> : <><LogIn size={12}/> Google 登入</>}
                 </button>
               </div>
               <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1 custom-scrollbar">
@@ -1250,6 +1292,44 @@ const App = () => {
                     </div>
                   </button>
                 ))}
+              </div>
+            </section>
+
+            {/* 管理員管理 */}
+            <section className={`rounded-2xl border p-5 ${cardBg} ${cardBorder}`}>
+              <h2 className={`text-base font-bold mb-4 flex items-center gap-2 ${accent}`}>
+                <Shield size={16} /> 管理員
+              </h2>
+              <div className="space-y-3">
+                <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${isDarkMode ? 'bg-emerald-900/10 border-emerald-800/30' : 'bg-emerald-50/50 border-emerald-200/60'}`}>
+                  {user?.photoURL && <img src={user.photoURL} alt="" className="w-8 h-8 rounded-full" referrerPolicy="no-referrer" />}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-semibold truncate">{user?.displayName || user?.email}</div>
+                    <div className={`text-xs ${textSecondary}`}>{user?.email}</div>
+                  </div>
+                  <button onClick={handleAdminLogout} className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-red-500 border border-red-200 hover:bg-red-50 dark:border-red-800/50 dark:hover:bg-red-900/20 transition-colors">
+                    <LogOut size={12}/> 登出
+                  </button>
+                </div>
+                <div className={`text-xs font-medium ${textSecondary} mt-4 mb-1.5`}>授權管理員清單</div>
+                {adminEmails.map(email => (
+                  <div key={email} className={`flex items-center justify-between px-4 py-2.5 rounded-xl border ${cardBorder}`}>
+                    <span className="text-sm font-mono">{email}</span>
+                    {email !== user?.email?.toLowerCase() && (
+                      <button onClick={() => removeAdminEmail(email)} className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors">
+                        <X size={14}/>
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <div className="flex gap-2">
+                  <input type="email" placeholder="新增管理員 Email" value={newAdminEmail} onChange={e => setNewAdminEmail(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && addAdminEmail()}
+                    className={`flex-1 px-4 py-2.5 rounded-xl border outline-none text-sm ${inputBg} focus:ring-2 focus:ring-orange-500/30`} />
+                  <button onClick={addAdminEmail} className={`px-4 py-2.5 ${accentBg} text-white rounded-xl text-sm font-medium hover:bg-orange-700 transition-colors flex items-center gap-1`}>
+                    <UserPlus size={14}/> 新增
+                  </button>
+                </div>
               </div>
             </section>
 
