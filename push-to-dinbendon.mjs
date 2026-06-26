@@ -208,7 +208,7 @@ async function main() {
 
     for (const order of orders) {
       const items = order.items || [{ name: order.itemName, price: order.price }];
-      const addProducts = [];
+      const productMap = new Map();
 
       for (const item of items) {
         const match = findProduct(item.name, item.price, categories);
@@ -216,17 +216,23 @@ async function main() {
           console.log(`   ❌ 找不到品項: ${item.name} $${item.price}`);
           continue;
         }
-        addProducts.push({
-          productId: match.product.id,
-          variationId: match.variation.id,
-          qty: 1,
-          comment: null,
-          categoryName: match.categoryName,
-          productName: match.product.name,
-          variationName: match.variation.name || '',
-          price: match.variation.price
-        });
+        const key = `${match.product.id}_${match.variation.id}`;
+        if (productMap.has(key)) {
+          productMap.get(key).qty += 1;
+        } else {
+          productMap.set(key, {
+            productId: match.product.id,
+            variationId: match.variation.id,
+            qty: 1,
+            comment: null,
+            categoryName: match.categoryName,
+            productName: match.product.name,
+            variationName: match.variation.name || '',
+            price: match.variation.price
+          });
+        }
       }
+      const addProducts = [...productMap.values()];
 
       if (addProducts.length === 0) {
         console.log(`   ⏭️  ${order.userName}: 無可匹配的品項`);

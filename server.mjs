@@ -332,23 +332,29 @@ async function pushOrders(agentName) {
     // 訂購人都是代理人名，備註填個人名
     for (const order of shopOrders) {
       const items = order.items || [{ name: order.itemName, price: order.price }];
-      const addProducts = [];
+      const productMap = new Map();
 
       for (const item of items) {
         const match = findProduct(item.name, item.price, categories);
         if (match) {
-          addProducts.push({
-            productId: match.product.id, variationId: match.variation.id,
-            qty: 1, comment: order.userName || '未知',
-            categoryName: match.categoryName,
-            productName: match.product.name, variationName: match.variation.name || '',
-            price: match.variation.price
-          });
+          const key = `${match.product.id}_${match.variation.id}`;
+          if (productMap.has(key)) {
+            productMap.get(key).qty += 1;
+          } else {
+            productMap.set(key, {
+              productId: match.product.id, variationId: match.variation.id,
+              qty: 1, comment: order.userName || '未知',
+              categoryName: match.categoryName,
+              productName: match.product.name, variationName: match.variation.name || '',
+              price: match.variation.price
+            });
+          }
         } else {
           results.push({ user: order.userName, status: 'skip', reason: `品項「${item.name}」比對失敗` });
           failed++;
         }
       }
+      const addProducts = [...productMap.values()];
 
       if (addProducts.length === 0) continue;
 
